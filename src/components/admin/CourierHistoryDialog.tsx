@@ -58,26 +58,23 @@ export function CourierHistoryDialog({ phone, customerName }: CourierHistoryDial
     setError(null);
 
     try {
-      const { data: response, error: fetchError } = await supabase.functions.invoke("courier-history", {
-        body: { phone },
+      const { data: response, error: fetchError } = await supabase.functions.invoke("combined-courier-history", {
+        body: { phone, skipBdCourier: false },
       });
 
       if (fetchError) {
         throw new Error(fetchError.message);
       }
 
-      // Handle blocked/service unavailable
-      if (response?.blocked) {
-        setError(response.message || "Service temporarily unavailable");
-        return;
-      }
-
       if (response?.error) {
         throw new Error(response.error);
       }
 
-      // The function returns: { success: true, data: { status, courierData, reports } }
-      setData(response?.data || {});
+      // Extract BD courier data from combined response
+      const bdCourier = response?.bd_courier;
+      const courierData = bdCourier?.courierData || null;
+
+      setData({ courierData } as CourierHistoryData);
     } catch (err) {
       console.error("Failed to fetch courier history:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch courier history";
