@@ -72,21 +72,22 @@ serve(async (req) => {
 
     console.log('Checking courier history for phone:', cleanPhone);
 
-    // BD Courier PAID API endpoint (api.bdcourier.com)
-    const apiUrl = `https://api.bdcourier.com/courier-check?phone=${encodeURIComponent(cleanPhone)}`;
+    // BD Courier PAID API endpoint (api.bdcourier.com) - POST method
+    const apiUrl = 'https://api.bdcourier.com/courier-check';
     
-    console.log('Calling BD Courier API:', apiUrl);
+    console.log('Calling BD Courier API (POST):', apiUrl, 'phone:', cleanPhone);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     const response = await fetch(apiUrl, {
-      method: 'GET',
+      method: 'POST',
       headers: {
         'Authorization': `Bearer ${BDCOURIER_API_KEY}`,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
+      body: JSON.stringify({ phone: cleanPhone }),
       signal: controller.signal,
     }).finally(() => clearTimeout(timeoutId));
 
