@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -115,16 +115,26 @@ const statusOptions = [
 
 const normalizePhoneForLookup = (phone: string): string => phone.replace(/\D/g, '').slice(-11);
 
-const ORDERS_CACHE_KEY = 'admin_orders_cache_v1';
-const ORDERS_CACHE_TTL = 60 * 1000;
-const ORDERS_PAGE_SIZE = 40;
-const ORDERS_FETCH_LIMIT = Infinity;
+const ORDERS_CACHE_KEY = 'admin_orders_cache_v2';
+const ORDERS_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
+const ORDERS_PAGE_SIZE = 50;
+
+// Debounce hook for search
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debouncedValue;
+}
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [visibleRows, setVisibleRows] = useState(ORDERS_PAGE_SIZE);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 200);
   const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [steadfastFilter, setSteadfastFilter] = useState<string>('all');
@@ -237,7 +247,7 @@ export default function AdminOrders() {
         const exists = prev.some((order) => order.id === createdOrder.id);
         const next = exists
           ? prev.map((order) => (order.id === createdOrder.id ? createdOrder : order))
-          : [createdOrder, ...prev].slice(0, ORDERS_FETCH_LIMIT);
+          : [createdOrder, ...prev];
 
         sessionStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: next }));
         return next;
@@ -297,56 +307,82 @@ export default function AdminOrders() {
   // Don't auto-fetch statuses on load - only on manual refresh
 
   const filteredOrders = useMemo(() => {
+    const searchLower = debouncedSearch.toLowerCase();
     return orders.filter(order => {
-      const matchesSearch = order.order_number.toLowerCase().includes(search.toLowerCase()) ||
-        order.shipping_name.toLowerCase().includes(search.toLowerCase()) ||
-        order.shipping_phone.includes(search);
-      const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-      const matchesSource = sourceFilter === 'all' || order.order_source === sourceFilter;
+      // Fast-path: status check first (most selective)
+      if (statusFilter !== 'all' && order.status !== statusFilter) return false;
+      if (sourceFilter !== 'all' && order.order_source !== sourceFilter) return false;
+
+      // Search
+      if (searchLower && !(
+        order.order_number.toLowerCase().includes(searchLower) ||
+        order.shipping_name.toLowerCase().includes(searchLower) ||
+        order.shipping_phone.includes(debouncedSearch)
+      )) return false;
 
       // Date filter
-      const orderDate = new Date(order.created_at);
-      orderDate.setHours(0, 0, 0, 0);
-
-      let matchesDate = true;
-      if (dateFrom) {
-        const fromDate = new Date(dateFrom);
-        fromDate.setHours(0, 0, 0, 0);
-        matchesDate = matchesDate && orderDate >= fromDate;
-      }
-      if (dateTo) {
-        const toDate = new Date(dateTo);
-        toDate.setHours(23, 59, 59, 999);
-        matchesDate = matchesDate && orderDate <= toDate;
+      if (dateFrom || dateTo) {
+        const orderTime = new Date(order.created_at).getTime();
+        if (dateFrom) {
+          const fromTime = new Date(dateFrom);
+          fromTime.setHours(0, 0, 0, 0);
+          if (orderTime < fromTime.getTime()) return false;
+        }
+        if (dateTo) {
+          const toTime = new Date(dateTo);
+          toTime.setHours(23, 59, 59, 999);
+          if (orderTime > toTime.getTime()) return false;
+        }
       }
 
       // Steadfast filter
-      let matchesSteadfast = true;
-      if (steadfastFilter !== 'all' && order.tracking_number) {
+      if (steadfastFilter !== 'all') {
+        if (!order.tracking_number) return false;
         const sfStatus = steadfastStatuses[order.tracking_number];
-        const deliveryStatus = sfStatus?.delivery_status?.toLowerCase() || sfStatus?.current_status?.toLowerCase() || '';
-
-        if (steadfastFilter === 'returned') {
-          matchesSteadfast = deliveryStatus.includes('return') || deliveryStatus.includes('cancelled');
-        } else if (steadfastFilter === 'delivered') {
-          matchesSteadfast = deliveryStatus.includes('delivered');
-        } else if (steadfastFilter === 'in_transit') {
-          matchesSteadfast = deliveryStatus.includes('transit') || deliveryStatus.includes('picked') || deliveryStatus.includes('hub');
-        } else if (steadfastFilter === 'pending_delivery') {
-          matchesSteadfast = deliveryStatus.includes('pending') || deliveryStatus === '';
-        }
-      } else if (steadfastFilter !== 'all' && !order.tracking_number) {
-        matchesSteadfast = false;
+        const deliveryStatus = (sfStatus?.delivery_status || sfStatus?.current_status || '').toLowerCase();
+        if (steadfastFilter === 'returned' && !(deliveryStatus.includes('return') || deliveryStatus.includes('cancelled'))) return false;
+        if (steadfastFilter === 'delivered' && !deliveryStatus.includes('delivered')) return false;
+        if (steadfastFilter === 'in_transit' && !(deliveryStatus.includes('transit') || deliveryStatus.includes('picked') || deliveryStatus.includes('hub'))) return false;
+        if (steadfastFilter === 'pending_delivery' && !(deliveryStatus.includes('pending') || deliveryStatus === '')) return false;
       }
 
-      return matchesSearch && matchesStatus && matchesSource && matchesSteadfast && matchesDate;
+      return true;
     });
-  }, [orders, search, statusFilter, sourceFilter, steadfastFilter, dateFrom, dateTo, steadfastStatuses]);
+  }, [orders, debouncedSearch, statusFilter, sourceFilter, steadfastFilter, dateFrom, dateTo, steadfastStatuses]);
+
+  // Pre-computed counts — O(n) single pass instead of O(n * statuses)
+  const { statusCounts, sourceCounts, totalBySource } = useMemo(() => {
+    const sc: Record<string, number> = {};
+    const src: Record<string, number> = {};
+    const tbs: Record<string, Record<string, number>> = {};
+
+    for (const order of orders) {
+      src[order.order_source] = (src[order.order_source] || 0) + 1;
+
+      // Status counts filtered by source
+      if (!tbs[order.order_source]) tbs[order.order_source] = {};
+      tbs[order.order_source][order.status] = (tbs[order.order_source][order.status] || 0) + 1;
+
+      // Global status counts
+      sc[order.status] = (sc[order.status] || 0) + 1;
+    }
+
+    return { statusCounts: sc, sourceCounts: src, totalBySource: tbs };
+  }, [orders]);
+
+  const getStatusCount = useCallback((status: string) => {
+    if (sourceFilter === 'all') return statusCounts[status] || 0;
+    return totalBySource[sourceFilter]?.[status] || 0;
+  }, [statusCounts, totalBySource, sourceFilter]);
+
+  const getSourceCount = useCallback((source: string) => {
+    return sourceCounts[source] || 0;
+  }, [sourceCounts]);
 
   useEffect(() => {
     setVisibleRows(ORDERS_PAGE_SIZE);
     setSelectedOrderIds(new Set());
-  }, [search, statusFilter, sourceFilter, steadfastFilter, dateFrom, dateTo]);
+  }, [debouncedSearch, statusFilter, sourceFilter, steadfastFilter, dateFrom, dateTo]);
 
   const displayedOrders = useMemo(
     () => filteredOrders.slice(0, visibleRows),
@@ -373,18 +409,6 @@ export default function AdminOrders() {
     }).length;
   };
 
-  // Calculate counts for each status
-  const getStatusCount = (status: string) => {
-    return orders.filter(order => {
-      const matchesSource = sourceFilter === 'all' || order.order_source === sourceFilter;
-      return order.status === status && matchesSource;
-    }).length;
-  };
-
-  // Calculate counts for each source
-  const getSourceCount = (source: string) => {
-    return orders.filter(order => order.order_source === source).length;
-  };
 
   const getSourceBadge = (source: string) => {
     const sourceOption = sourceOptions.find(s => s.value === source);
@@ -889,7 +913,7 @@ export default function AdminOrders() {
             >
               All
               <Badge variant="outline" className="ml-2 h-5 px-1.5 text-xs">
-                {orders.filter(o => sourceFilter === 'all' || o.order_source === sourceFilter).length}
+                {sourceFilter === 'all' ? orders.length : (sourceCounts[sourceFilter] || 0)}
               </Badge>
             </TabsTrigger>
           </TabsList>
