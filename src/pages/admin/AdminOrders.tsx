@@ -1025,7 +1025,7 @@ export default function AdminOrders() {
                           )}
                         </div>
                         <div className="text-sm text-muted-foreground">{order.shipping_phone}</div>
-                        <CombinedCourierHistoryInline phone={order.shipping_phone} className="mt-2" />
+                        <CombinedCourierHistoryInline phone={order.shipping_phone} className="mt-2" autoFetchBdCourier={order.status === 'pending'} />
                       </div>
                       <div className="shrink-0 pt-1">
                         <CourierHistoryDialog phone={order.shipping_phone} customerName={order.shipping_name} />

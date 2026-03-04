@@ -156,10 +156,12 @@ function RiskBadge({ level }: { level: string }) {
 
 export function CombinedCourierHistoryInline({ 
   phone, 
-  className 
+  className,
+  autoFetchBdCourier = false,
 }: { 
   phone: string; 
   className?: string;
+  autoFetchBdCourier?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<CombinedResponse | null>(null);
@@ -167,7 +169,7 @@ export function CombinedCourierHistoryInline({
 
   const normalizedPhone = useMemo(() => normalizePhone(phone), [phone]);
 
-  // Initial fetch - skip BD Courier to avoid rate limiting, only fetch internal data
+  // Initial fetch - optionally include BD Courier data
   useEffect(() => {
     if (!normalizedPhone || normalizedPhone.length < 11) {
       setLoading(false);
@@ -184,10 +186,9 @@ export function CombinedCourierHistoryInline({
 
     const fetchData = async () => {
       try {
-        // Skip BD Courier on initial load to prevent API flooding
         const { data: result, error } = await supabase.functions.invoke(
           "combined-courier-history",
-          { body: { phone: normalizedPhone, skipBdCourier: true } }
+          { body: { phone: normalizedPhone, skipBdCourier: !autoFetchBdCourier } }
         );
 
         if (error) throw error;
