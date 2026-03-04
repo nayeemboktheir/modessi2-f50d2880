@@ -178,14 +178,18 @@ export default function AdminOrders() {
     }
   };
 
-  // Fetch Steadfast statuses for orders with tracking numbers
-  const fetchSteadfastStatuses = useCallback(async () => {
-    const ordersWithTracking = orders.filter(o => o.tracking_number);
+  // Fetch Steadfast statuses only for filtered/visible orders with tracking numbers
+  const fetchSteadfastStatuses = useCallback(async (ordersToCheck?: Order[]) => {
+    const targetOrders = ordersToCheck || orders;
+    const ordersWithTracking = targetOrders.filter(o => o.tracking_number && !steadfastStatuses[o.tracking_number!]);
     if (ordersWithTracking.length === 0) return;
+
+    // Limit to 50 at a time to avoid edge function timeout
+    const batch = ordersWithTracking.slice(0, 50);
 
     setLoadingStatuses(true);
     try {
-      const trackingCodes = ordersWithTracking.map(o => o.tracking_number!);
+      const trackingCodes = batch.map(o => o.tracking_number!);
       
       const { data, error } = await supabase.functions.invoke('steadfast-status', {
         body: { tracking_codes: trackingCodes },
@@ -193,26 +197,20 @@ export default function AdminOrders() {
 
       if (error) {
         console.error('Failed to fetch Steadfast statuses:', error);
-        toast.error('Failed to fetch delivery statuses');
         return;
       }
 
       if (data?.results) {
-        setSteadfastStatuses(data.results);
+        setSteadfastStatuses(prev => ({ ...prev, ...data.results }));
       }
     } catch (error) {
       console.error('Error fetching Steadfast statuses:', error);
     } finally {
       setLoadingStatuses(false);
     }
-  }, [orders]);
+  }, [orders, steadfastStatuses]);
 
-  // Auto-fetch statuses when orders load
-  useEffect(() => {
-    if (orders.length > 0) {
-      fetchSteadfastStatuses();
-    }
-  }, [orders.length]); // Only trigger when orders change
+  // Don't auto-fetch statuses on load - only on manual refresh
 
   const filteredOrders = orders.filter(order => {
     const matchesSearch = order.order_number.toLowerCase().includes(search.toLowerCase()) ||
@@ -840,7 +838,7 @@ export default function AdminOrders() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={fetchSteadfastStatuses}
+          onClick={() => fetchSteadfastStatuses()}
           disabled={loadingStatuses}
           className="gap-1 ml-auto"
         >

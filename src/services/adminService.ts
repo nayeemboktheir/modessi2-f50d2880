@@ -45,36 +45,55 @@ export const getDashboardStats = async (dateParams?: DateRangeParams) => {
     ? getDateRangeBounds(dateParams) 
     : getDateRangeBounds({ range: 'week' });
 
-  const [ordersResult, productsResult, usersResult] = await Promise.all([
-    supabase.from('orders').select('id, total, status, created_at, payment_status'),
-    supabase.from('products').select('id, stock, is_active'),
-    supabase.from('profiles').select('id'),
+  const startISO = start.toISOString();
+  const endISO = end.toISOString();
+
+  // All queries run in parallel with server-side date filtering
+  const [ordersResult, ordersCountResult, productsResult, usersCountResult, lowStockResult, pendingResult] = await Promise.all([
+    // Filtered orders for chart data (only within date range)
+    supabase.from('orders')
+      .select('total, status, created_at, payment_status')
+      .gte('created_at', startISO)
+      .lte('created_at', endISO)
+      .order('created_at', { ascending: false })
+      .limit(500),
+    // Total count of filtered orders
+    supabase.from('orders')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', startISO)
+      .lte('created_at', endISO),
+    // Product count only
+    supabase.from('products')
+      .select('*', { count: 'exact', head: true }),
+    // User count only
+    supabase.from('profiles')
+      .select('*', { count: 'exact', head: true }),
+    // Low stock count
+    supabase.from('products')
+      .select('*', { count: 'exact', head: true })
+      .lt('stock', 10)
+      .eq('is_active', true),
+    // Pending orders count (within date range)
+    supabase.from('orders')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .gte('created_at', startISO)
+      .lte('created_at', endISO),
   ]);
 
-  const allOrders = ordersResult.data || [];
-  const products = productsResult.data || [];
-  const users = usersResult.data || [];
-
-  // Filter orders by date range
-  const filteredOrders = allOrders.filter(o => {
-    const orderDate = new Date(o.created_at);
-    return orderDate >= start && orderDate <= end;
-  });
+  const filteredOrders = ordersResult.data || [];
 
   const totalRevenue = filteredOrders
     .filter(o => o.payment_status === 'paid')
     .reduce((sum, order) => sum + Number(order.total), 0);
-  
-  const pendingOrders = filteredOrders.filter(o => o.status === 'pending').length;
-  const lowStockProducts = products.filter(p => p.stock < 10 && p.is_active).length;
 
   return {
-    totalOrders: filteredOrders.length,
-    totalProducts: products.length,
-    totalUsers: users.length,
+    totalOrders: ordersCountResult.count || 0,
+    totalProducts: productsResult.count || 0,
+    totalUsers: usersCountResult.count || 0,
     totalRevenue,
-    pendingOrders,
-    lowStockProducts,
+    pendingOrders: pendingResult.count || 0,
+    lowStockProducts: lowStockResult.count || 0,
     recentOrders: filteredOrders,
     dateRange: { start, end },
   };
@@ -217,7 +236,8 @@ export const getAllOrders = async () => {
       *,
       order_items (*)
     `)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(300);
 
   if (error) throw error;
   return data;
