@@ -174,6 +174,8 @@ type CourierHistoryApiResponse = {
 };
 
 const courierCache = new Map<string, { data?: CourierData; fetchedAt: number }>();
+let productsCache: { data: Product[]; fetchedAt: number } | null = null;
+const PRODUCTS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Previous customer type
 interface PreviousCustomer {
@@ -336,6 +338,13 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
   };
 
   const loadProducts = async () => {
+    // Use cache if available and fresh
+    if (productsCache && Date.now() - productsCache.fetchedAt < PRODUCTS_CACHE_TTL) {
+      setProducts(productsCache.data);
+      setLoadingProducts(false);
+      return;
+    }
+
     setLoadingProducts(true);
     try {
       // Fetch products and variations in parallel for speed
@@ -384,6 +393,7 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
         };
       });
 
+      productsCache = { data: productsWithVariations, fetchedAt: Date.now() };
       setProducts(productsWithVariations);
     } catch (error) {
       toast.error('Failed to load products');
