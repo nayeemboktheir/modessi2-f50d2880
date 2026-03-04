@@ -183,12 +183,14 @@ export const OrderInvoice = forwardRef<HTMLDivElement, OrderInvoiceProps>(
                       />
                     )}
                     <div>
-                      <p style={{ fontWeight: '600', margin: 0, fontSize: '14px' }}>{item.product_name}</p>
-                      {item.variation_name && (
-                        <p style={{ color: '#2563eb', fontSize: '12px', margin: '2px 0 0 0', fontWeight: '500' }}>
-                          Size: {item.variation_name}
-                        </p>
-                      )}
+                      <p style={{ fontWeight: '600', margin: 0, fontSize: '14px' }}>
+                        {item.product_name}
+                        {item.variation_name && (
+                          <span style={{ color: '#2563eb', fontWeight: '500', marginLeft: '6px', fontSize: '13px' }}>
+                            [{item.variation_name}]
+                          </span>
+                        )}
+                      </p>
                       <p style={{ color: '#c53030', fontSize: '12px', margin: '3px 0 0 0' }}>
                         ৳{Number(item.price).toFixed(0)}
                       </p>
