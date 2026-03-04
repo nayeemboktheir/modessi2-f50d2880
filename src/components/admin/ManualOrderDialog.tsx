@@ -353,12 +353,14 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
           .from('products')
           .select('id, name, price, images, stock, slug')
           .eq('is_active', true)
-          .order('name'),
+          .order('name')
+          .limit(500),
         supabase
           .from('product_variations')
           .select('id, name, price, stock, product_id, sort_order')
           .eq('is_active', true)
-          .order('sort_order'),
+          .order('sort_order')
+          .limit(2000),
       ]);
 
       if (productsResult.error) throw productsResult.error;
