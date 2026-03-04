@@ -48,6 +48,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
 import { CourierHistoryDialog } from '@/components/admin/CourierHistoryDialog';
+import { CourierHistoryInline } from '@/components/admin/CourierHistoryInline';
 import { InvoicePrintDialog } from '@/components/admin/InvoicePrintDialog';
 import { StickerPrintDialog } from '@/components/admin/StickerPrintDialog';
 import { ManualOrderDialog } from '@/components/admin/ManualOrderDialog';
@@ -1150,7 +1151,7 @@ export default function AdminOrders() {
                           )}
                         </div>
                         <div className="text-sm text-muted-foreground">{order.shipping_phone}</div>
-                        
+                        <CourierHistoryInline phone={order.shipping_phone} />
                       </div>
                       <div className="shrink-0 pt-1">
                         <CourierHistoryDialog phone={order.shipping_phone} customerName={order.shipping_name} />
