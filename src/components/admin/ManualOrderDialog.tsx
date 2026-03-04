@@ -241,24 +241,23 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
     }
   }, [shippingZone]);
 
-  // Load previous customers from orders
+  // Load previous customers from orders - optimized with limit
   const loadPreviousCustomers = async () => {
     try {
       const { data, error } = await supabase
         .from('orders')
         .select('shipping_phone, shipping_name, shipping_street, shipping_district, shipping_city, created_at')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(500);
 
       if (error) throw error;
 
-      // Group by phone number and get latest order info
       const customerMap = new Map<string, PreviousCustomer>();
       (data || []).forEach((order) => {
         const normalizedPhone = order.shipping_phone.replace(/\D/g, '').slice(-11);
         if (normalizedPhone.length === 11) {
           if (customerMap.has(normalizedPhone)) {
-            const existing = customerMap.get(normalizedPhone)!;
-            existing.orderCount++;
+            customerMap.get(normalizedPhone)!.orderCount++;
           } else {
             customerMap.set(normalizedPhone, {
               phone: order.shipping_phone,
@@ -301,27 +300,33 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
   const loadProducts = async () => {
     setLoadingProducts(true);
     try {
-      // Fetch products with their variations
-      const { data: productsData, error: productsError } = await supabase
-        .from('products')
-        .select('id, name, price, images, stock, slug')
-        .eq('is_active', true)
-        .order('name');
+      // Fetch products and variations in parallel for speed
+      const [productsResult, variationsResult] = await Promise.all([
+        supabase
+          .from('products')
+          .select('id, name, price, images, stock, slug')
+          .eq('is_active', true)
+          .order('name'),
+        supabase
+          .from('product_variations')
+          .select('id, name, price, stock, product_id, sort_order')
+          .eq('is_active', true)
+          .order('sort_order'),
+      ]);
 
-      if (productsError) throw productsError;
+      if (productsResult.error) throw productsResult.error;
+      if (variationsResult.error) throw variationsResult.error;
 
-      // Fetch all variations
-      const { data: variationsData, error: variationsError } = await supabase
-        .from('product_variations')
-        .select('id, name, price, stock, product_id, sort_order')
-        .eq('is_active', true)
-        .order('sort_order');
+      // Build a map of variations by product_id for O(1) lookup
+      const variationsByProduct = new Map<string, typeof variationsResult.data>();
+      (variationsResult.data || []).forEach((v) => {
+        const list = variationsByProduct.get(v.product_id) || [];
+        list.push(v);
+        variationsByProduct.set(v.product_id, list);
+      });
 
-      if (variationsError) throw variationsError;
-
-      // Map variations to products (dedupe by normalized name per product)
-      const productsWithVariations = (productsData || []).map((product) => {
-        const perProduct = (variationsData || []).filter((v) => v.product_id === product.id);
+      const productsWithVariations = (productsResult.data || []).map((product) => {
+        const perProduct = variationsByProduct.get(product.id) || [];
         const uniqueByName = Array.from(
           new Map(
             perProduct
