@@ -25,6 +25,10 @@ type PlaceOrderBody = {
   invoiceNote?: string | null;
   steadfastNote?: string | null;
   orderSource?: 'web' | 'manual' | 'landing_page';
+  // Manual order overrides (only respected for orderSource === 'manual')
+  customShippingCost?: number;
+  customDiscount?: number;
+  customAdvance?: number;
 };
 
 function normalizeBdPhoneLocal(phone: string) {
@@ -411,6 +415,8 @@ Deno.serve(async (req) => {
       }
     }
 
+    const isManualOrder = body.orderSource === 'manual';
+
     const enrichedDbItems = uuidItems.map((i) => {
       const p = productById.get(i.productId);
       if (!p) return null;
@@ -419,13 +425,19 @@ Deno.serve(async (req) => {
       if (i.variationId && !v) return null;
       if (v && v.product_id !== p.id) return null;
 
+      // For manual orders, use client-sent price if provided; otherwise use DB price
+      const dbPrice = v ? Number(v.price) : Number(p.price);
+      const itemPrice = (isManualOrder && typeof i.price === 'number' && Number.isFinite(i.price) && i.price >= 0)
+        ? i.price
+        : dbPrice;
+
       return {
         productId: p.id,
         variationId: v?.id ?? null,
         variationName: v?.name ?? null,
         name: v ? `${p.name} (${v.name})` : p.name,
         image: p.images?.[0] ?? null,
-        price: v ? Number(v.price) : Number(p.price),
+        price: itemPrice,
         quantity: i.quantity,
       };
     });
@@ -487,16 +499,29 @@ Deno.serve(async (req) => {
 
     const subtotal = itemsFinal.reduce((sum, i) => sum + i.price * i.quantity, 0);
     
-    // Shipping cost based on zone: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK
+    // For manual orders, use admin-provided shipping cost and discount
     const shippingZone = body.shippingZone || 'outside_dhaka';
-    const shippingCost = shippingZone === 'inside_dhaka' ? 80 : 130;
-    const total = subtotal + shippingCost;
+    const defaultShippingCost = shippingZone === 'inside_dhaka' ? 80 : 130;
+    
+    const shippingCost = (isManualOrder && typeof body.customShippingCost === 'number' && Number.isFinite(body.customShippingCost) && body.customShippingCost >= 0)
+      ? body.customShippingCost
+      : defaultShippingCost;
+    
+    const discount = (isManualOrder && typeof body.customDiscount === 'number' && Number.isFinite(body.customDiscount) && body.customDiscount >= 0)
+      ? body.customDiscount
+      : 0;
+    
+    const advance = (isManualOrder && typeof body.customAdvance === 'number' && Number.isFinite(body.customAdvance) && body.customAdvance >= 0)
+      ? body.customAdvance
+      : 0;
+    
+    const total = subtotal - discount + shippingCost - advance;
     
     // Parse notes and order source
     const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 500) : null;
     const invoiceNote = typeof body.invoiceNote === 'string' ? body.invoiceNote.trim().slice(0, 500) : null;
     const steadfastNote = typeof body.steadfastNote === 'string' ? body.steadfastNote.trim().slice(0, 500) : null;
-    const orderSource = body.orderSource === 'manual' ? 'manual' : (body.orderSource === 'landing_page' ? 'landing_page' : 'web');
+    const orderSource = isManualOrder ? 'manual' : (body.orderSource === 'landing_page' ? 'landing_page' : 'web');
 
     const orderId = crypto.randomUUID();
 
@@ -508,10 +533,10 @@ Deno.serve(async (req) => {
         order_number: '',
         status: 'pending',
         payment_method: 'cod',
-        payment_status: 'pending',
+        payment_status: advance > 0 ? 'partial' : 'pending',
         subtotal,
         shipping_cost: shippingCost,
-        discount: 0,
+        discount,
         total,
         shipping_name: name,
         shipping_phone: phone,
@@ -519,7 +544,7 @@ Deno.serve(async (req) => {
         shipping_city: 'N/A',
         shipping_district: 'N/A',
         shipping_postal_code: null,
-        notes,
+        notes: advance > 0 ? `${notes ? notes + ' | ' : ''}Advance: ৳${advance}` : notes,
         invoice_note: invoiceNote,
         steadfast_note: steadfastNote,
         order_source: orderSource,

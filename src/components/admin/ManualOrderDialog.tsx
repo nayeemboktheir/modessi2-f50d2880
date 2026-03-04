@@ -576,7 +576,6 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
           userId: null,
           items: orderItems.map(item => {
             const basePrice = item.variation ? item.variation.price : item.product.price;
-            // Use custom price if set (can be 0), otherwise use base price
             const itemPrice = item.customPrice !== undefined ? item.customPrice : basePrice;
             const variationName = item.variation?.name || null;
             return {
@@ -598,6 +597,10 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
           invoiceNote: invoiceNote || null,
           steadfastNote: steadfastNote || null,
           orderSource: 'manual',
+          // Send admin-set pricing overrides
+          customShippingCost: shippingCost,
+          customDiscount: discountAmount,
+          customAdvance: advanceAmount,
         },
       });
 
