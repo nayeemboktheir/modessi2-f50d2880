@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { Plus, Minus, Trash2, Star, Loader2, Phone, MessageCircle, UserCheck, History, AlertTriangle, ShieldAlert, CheckCircle, XCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { syncOrderToBotBhai } from '@/services/botbhaiService';
+
 import { Badge } from '@/components/ui/badge';
 
 interface ProductVariation {
@@ -673,28 +673,6 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
         throw new Error('Order response missing order number');
       }
 
-      // Sync to BotBhai in background
-      const orderId = data.orderId || data.orderNumber;
-      syncOrderToBotBhai({
-        id: orderId,
-        total: grandTotal,
-        subtotal,
-        shipping_cost: shippingCost,
-        discount: discountAmount,
-        status: 'pending',
-        payment_method: 'cod',
-        payment_status: 'unpaid',
-        customer: {
-          name: customerName,
-          phone: mobileNumber,
-          address: customerAddress,
-        },
-        items: orderItems.map(item => ({
-          product_id: item.product.id,
-          qty: item.quantity,
-          price: item.customPrice !== undefined ? item.customPrice : (item.variation ? item.variation.price : item.product.price),
-        })),
-      }).catch(() => {});
 
       toast.success(`Order created successfully! Order #${data.orderNumber || data.orderId}`);
       resetForm();

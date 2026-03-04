@@ -24,7 +24,7 @@ import {
   Home,
   Video,
   Shield,
-  Bot,
+  
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import {
@@ -66,7 +66,7 @@ const adminNavItems = [
   { title: 'Site Settings', url: '/admin/site-settings', icon: Settings },
   { title: 'Home Page Edit', url: '/admin/home-page-edit', icon: Home },
   { title: 'Landing Video', url: '/admin/landing-video-settings', icon: Video },
-  { title: 'BotBhai Integration', url: '/admin/botbhai', icon: Bot },
+  
 ];
 
 function AdminSidebar() {

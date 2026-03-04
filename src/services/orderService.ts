@@ -1,6 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { Order, CartItem } from '@/types';
-import { syncOrderToBotBhai } from '@/services/botbhaiService';
+
 
 interface CreateOrderData {
   userId: string | null;
@@ -90,26 +90,6 @@ export const createOrder = async (orderData: CreateOrderData): Promise<Order> =>
 
   const now = new Date().toISOString();
 
-  // Sync order to BotBhai in background
-  syncOrderToBotBhai({
-    id: data.orderId,
-    total: Number(data.total),
-    subtotal: Number(data.subtotal),
-    shipping_cost: Number(data.shippingCost),
-    status: 'pending',
-    payment_method: 'cod',
-    payment_status: 'unpaid',
-    customer: {
-      name: orderData.shippingAddress.name,
-      phone: orderData.shippingAddress.phone,
-      address: orderData.shippingAddress.address,
-    },
-    items: orderData.items.map(i => ({
-      product_id: i.product.id,
-      qty: i.quantity,
-      price: i.product.price,
-    })),
-  }).catch(() => {});
 
   return {
     id: data.orderId,

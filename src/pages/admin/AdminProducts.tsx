@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { syncProductToBotBhai, deleteProductFromBotBhai } from '@/services/botbhaiService';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -423,22 +423,6 @@ export default function AdminProducts() {
         toast.success('Product created successfully');
       }
 
-      // Sync to BotBhai in background
-      const categoryName = categories.find(c => c.id === productData.category_id)?.name || '';
-      syncProductToBotBhai({
-        id: productId,
-        name: productData.name,
-        price: productData.price,
-        original_price: productData.original_price,
-        stock: productData.stock,
-        images: productData.images,
-        category: categoryName,
-        tags: productData.tags,
-        description: productData.description,
-        short_description: productData.short_description,
-        long_description: productData.long_description,
-        is_active: productData.is_active ?? true,
-      }).catch(() => {});
 
       // Save variations
       await saveVariations(productId);
@@ -459,8 +443,6 @@ export default function AdminProducts() {
       // Delete variations first
       await supabase.from('product_variations').delete().eq('product_id', id);
       await deleteProduct(id);
-      // Sync deletion to BotBhai
-      deleteProductFromBotBhai(id).catch(() => {});
       toast.success('Product deleted successfully');
       loadData();
     } catch (error) {
