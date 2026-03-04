@@ -178,6 +178,21 @@ export default function AdminOrders() {
     }
   };
 
+  const handleOrderUpdated = useCallback((updatedOrder: Order) => {
+    setOrders(prev => prev.map(o => (o.id === updatedOrder.id ? updatedOrder : o)));
+
+    if (selectedOrder?.id === updatedOrder.id) {
+      setSelectedOrder(updatedOrder);
+      setTrackingNumber(updatedOrder.tracking_number || '');
+      setInvoiceNote(updatedOrder.invoice_note || '');
+      setSteadfastNote(updatedOrder.steadfast_note || '');
+    }
+
+    if (orderToEdit?.id === updatedOrder.id) {
+      setOrderToEdit(updatedOrder);
+    }
+  }, [selectedOrder, orderToEdit]);
+
   // Fetch Steadfast statuses only for filtered/visible orders with tracking numbers
   const fetchSteadfastStatuses = useCallback(async (ordersToCheck?: Order[]) => {
     const targetOrders = ordersToCheck || orders;
@@ -1025,7 +1040,7 @@ export default function AdminOrders() {
                           )}
                         </div>
                         <div className="text-sm text-muted-foreground">{order.shipping_phone}</div>
-                        <CombinedCourierHistoryInline phone={order.shipping_phone} className="mt-2" autoFetchBdCourier={order.status === 'pending'} />
+                        <CombinedCourierHistoryInline phone={order.shipping_phone} className="mt-2" />
                       </div>
                       <div className="shrink-0 pt-1">
                         <CourierHistoryDialog phone={order.shipping_phone} customerName={order.shipping_name} />
@@ -1384,7 +1399,7 @@ export default function AdminOrders() {
         order={orderToEdit}
         open={isEditOrderOpen}
         onOpenChange={setIsEditOrderOpen}
-        onOrderUpdated={loadOrders}
+        onOrderUpdated={handleOrderUpdated}
       />
 
       {/* Delete Confirmation Dialog */}

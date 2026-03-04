@@ -60,7 +60,7 @@ interface OrderEditDialogProps {
   order: Order | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onOrderUpdated: () => void;
+  onOrderUpdated: (updatedOrder: Order) => void;
 }
 
 const paymentMethods = [
@@ -175,44 +175,51 @@ export function OrderEditDialog({ order, open, onOpenChange, onOrderUpdated }: O
 
     setSaving(true);
     try {
-      // Update order details
-      const { error: orderError } = await supabase
-        .from('orders')
-        .update({
-          shipping_name: shippingName.trim(),
-          shipping_phone: shippingPhone.trim(),
-          shipping_street: shippingStreet.trim(),
-          shipping_city: shippingCity.trim(),
-          shipping_district: shippingDistrict.trim(),
-          shipping_postal_code: shippingPostalCode.trim() || null,
-          payment_method: paymentMethod,
-          payment_status: paymentStatus,
-          shipping_cost: shippingCost,
-          discount: discount,
-          notes: notes.trim() || null,
-          subtotal: subtotal,
-          total: total,
-        })
-        .eq('id', order.id);
+      const normalizedItems: OrderItem[] = items.map((item) => ({
+        ...item,
+        id: item.id.startsWith('new-') ? crypto.randomUUID() : item.id,
+        product_name: item.product_name?.trim() || 'Item',
+        quantity: Number(item.quantity) || 1,
+        price: Number(item.price) || 0,
+        variation_name: item.variation_name?.trim() || null,
+      }));
+
+      // Run independent operations in parallel to reduce save latency
+      const [{ error: orderError }, { error: deleteError }] = await Promise.all([
+        supabase
+          .from('orders')
+          .update({
+            shipping_name: shippingName.trim(),
+            shipping_phone: shippingPhone.trim(),
+            shipping_street: shippingStreet.trim(),
+            shipping_city: shippingCity.trim(),
+            shipping_district: shippingDistrict.trim(),
+            shipping_postal_code: shippingPostalCode.trim() || null,
+            payment_method: paymentMethod,
+            payment_status: paymentStatus,
+            shipping_cost: shippingCost,
+            discount: discount,
+            notes: notes.trim() || null,
+            subtotal: subtotal,
+            total: total,
+          })
+          .eq('id', order.id),
+        supabase
+          .from('order_items')
+          .delete()
+          .eq('order_id', order.id),
+      ]);
 
       if (orderError) throw orderError;
-
-      // Handle order items - delete old ones and insert new ones
-      // First, delete existing items
-      const { error: deleteError } = await supabase
-        .from('order_items')
-        .delete()
-        .eq('order_id', order.id);
-
       if (deleteError) throw deleteError;
 
-      // Insert updated items
-      const itemsToInsert = items.map(item => ({
+      const itemsToInsert = normalizedItems.map(item => ({
+        id: item.id,
         order_id: order.id,
         product_name: item.product_name,
         product_image: item.product_image,
-        quantity: Number(item.quantity),
-        price: Number(item.price),
+        quantity: item.quantity,
+        price: item.price,
         variation_name: item.variation_name,
         product_id: null,
         variation_id: null,
@@ -224,8 +231,26 @@ export function OrderEditDialog({ order, open, onOpenChange, onOrderUpdated }: O
 
       if (insertError) throw insertError;
 
+      const updatedOrder: Order = {
+        ...order,
+        shipping_name: shippingName.trim(),
+        shipping_phone: shippingPhone.trim(),
+        shipping_street: shippingStreet.trim(),
+        shipping_city: shippingCity.trim(),
+        shipping_district: shippingDistrict.trim(),
+        shipping_postal_code: shippingPostalCode.trim() || null,
+        payment_method: paymentMethod,
+        payment_status: paymentStatus,
+        shipping_cost: shippingCost,
+        discount,
+        notes: notes.trim() || null,
+        subtotal,
+        total,
+        order_items: normalizedItems,
+      };
+
       toast.success('Order updated successfully');
-      onOrderUpdated();
+      onOrderUpdated(updatedOrder);
       onOpenChange(false);
     } catch (error) {
       console.error('Error updating order:', error);
