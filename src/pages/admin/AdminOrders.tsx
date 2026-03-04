@@ -1525,7 +1525,7 @@ export default function AdminOrders() {
       <ManualOrderDialog
         open={isManualOrderOpen}
         onOpenChange={setIsManualOrderOpen}
-        onOrderCreated={loadOrders}
+        onOrderCreated={() => { void loadOrders(false); }}
       />
     </div>
   );

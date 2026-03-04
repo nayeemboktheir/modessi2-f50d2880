@@ -188,6 +188,9 @@ interface PreviousCustomer {
   orderCount: number;
 }
 
+let previousCustomersCache: { data: PreviousCustomer[]; fetchedAt: number } | null = null;
+const PREVIOUS_CUSTOMERS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: ManualOrderDialogProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
@@ -281,8 +284,13 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
     }
   }, [shippingZone]);
 
-  // Load previous customers from orders - optimized with limit
+  // Load previous customers from orders - optimized with cache + limit
   const loadPreviousCustomers = async () => {
+    if (previousCustomersCache && Date.now() - previousCustomersCache.fetchedAt < PREVIOUS_CUSTOMERS_CACHE_TTL) {
+      setPreviousCustomers(previousCustomersCache.data);
+      return;
+    }
+
     try {
       const { data, error } = await supabase
         .from('orders')
@@ -312,7 +320,9 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
         }
       });
 
-      setPreviousCustomers(Array.from(customerMap.values()));
+      const nextCustomers = Array.from(customerMap.values());
+      previousCustomersCache = { data: nextCustomers, fetchedAt: Date.now() };
+      setPreviousCustomers(nextCustomers);
     } catch (error) {
       console.error('Failed to load previous customers:', error);
     }
