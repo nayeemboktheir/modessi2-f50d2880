@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useGoogleAnalytics } from '@/hooks/useGoogleAnalytics';
 
@@ -10,13 +10,14 @@ import { useGoogleAnalytics } from '@/hooks/useGoogleAnalytics';
 const GoogleAnalyticsTracker = () => {
   const location = useLocation();
   const { trackPageView } = useGoogleAnalytics();
+  const lastTrackedPath = useRef<string>('');
 
   // Track page views on route changes, excluding admin routes
   useEffect(() => {
-    // Skip tracking for admin routes
-    if (location.pathname.startsWith('/admin')) {
-      return;
-    }
+    if (location.pathname.startsWith('/admin')) return;
+    if (location.pathname === lastTrackedPath.current) return;
+    
+    lastTrackedPath.current = location.pathname;
     trackPageView(location.pathname);
   }, [location.pathname, trackPageView]);
 

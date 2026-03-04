@@ -263,23 +263,16 @@ export const updateOrderStatus = async (id: string, status: string, trackingNumb
 };
 
 export const deleteOrder = async (id: string) => {
-  // First delete SMS logs associated with this order
-  const { error: smsError } = await supabase
-    .from('sms_logs')
-    .delete()
-    .eq('order_id', id);
+  // Delete SMS logs and order items in parallel first
+  const [{ error: smsError }, { error: itemsError }] = await Promise.all([
+    supabase.from('sms_logs').delete().eq('order_id', id),
+    supabase.from('order_items').delete().eq('order_id', id),
+  ]);
 
   if (smsError) throw smsError;
-
-  // Then delete order items
-  const { error: itemsError } = await supabase
-    .from('order_items')
-    .delete()
-    .eq('order_id', id);
-
   if (itemsError) throw itemsError;
 
-  // Finally delete the order
+  // Then delete the order
   const { error } = await supabase
     .from('orders')
     .delete()
