@@ -116,9 +116,14 @@ const statusOptions = [
 
 const normalizePhoneForLookup = (phone: string): string => phone.replace(/\D/g, '').slice(-11);
 
+const ORDERS_CACHE_KEY = 'admin_orders_cache_v1';
+const ORDERS_CACHE_TTL = 60 * 1000;
+const ORDERS_PAGE_SIZE = 40;
+
 export default function AdminOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [visibleRows, setVisibleRows] = useState(ORDERS_PAGE_SIZE);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
@@ -185,17 +190,38 @@ export default function AdminOrders() {
   };
 
   useEffect(() => {
-    loadOrders();
+    let cachedLoaded = false;
+
+    try {
+      const raw = sessionStorage.getItem(ORDERS_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { timestamp: number; data: Order[] };
+        const isFresh = Date.now() - parsed.timestamp < ORDERS_CACHE_TTL;
+        if (isFresh && Array.isArray(parsed.data) && parsed.data.length > 0) {
+          setOrders(parsed.data);
+          setLoading(false);
+          cachedLoaded = true;
+        }
+      }
+    } catch {
+      // ignore cache parse errors
+    }
+
+    void loadOrders(!cachedLoaded);
   }, []);
 
-  const loadOrders = async () => {
+  const loadOrders = async (showLoader = true) => {
+    if (showLoader) setLoading(true);
+
     try {
       const data = await getAllOrders();
-      setOrders(data || []);
+      const nextOrders = data || [];
+      setOrders(nextOrders);
+      sessionStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: nextOrders }));
     } catch (error) {
       toast.error('Failed to load orders');
     } finally {
-      setLoading(false);
+      if (showLoader) setLoading(false);
     }
   };
 
@@ -255,11 +281,11 @@ export default function AdminOrders() {
         order.shipping_phone.includes(search);
       const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
       const matchesSource = sourceFilter === 'all' || order.order_source === sourceFilter;
-      
+
       // Date filter
       const orderDate = new Date(order.created_at);
       orderDate.setHours(0, 0, 0, 0);
-      
+
       let matchesDate = true;
       if (dateFrom) {
         const fromDate = new Date(dateFrom);
@@ -271,13 +297,13 @@ export default function AdminOrders() {
         toDate.setHours(23, 59, 59, 999);
         matchesDate = matchesDate && orderDate <= toDate;
       }
-      
+
       // Steadfast filter
       let matchesSteadfast = true;
       if (steadfastFilter !== 'all' && order.tracking_number) {
         const sfStatus = steadfastStatuses[order.tracking_number];
         const deliveryStatus = sfStatus?.delivery_status?.toLowerCase() || sfStatus?.current_status?.toLowerCase() || '';
-        
+
         if (steadfastFilter === 'returned') {
           matchesSteadfast = deliveryStatus.includes('return') || deliveryStatus.includes('cancelled');
         } else if (steadfastFilter === 'delivered') {
@@ -290,10 +316,22 @@ export default function AdminOrders() {
       } else if (steadfastFilter !== 'all' && !order.tracking_number) {
         matchesSteadfast = false;
       }
-      
+
       return matchesSearch && matchesStatus && matchesSource && matchesSteadfast && matchesDate;
     });
   }, [orders, search, statusFilter, sourceFilter, steadfastFilter, dateFrom, dateTo, steadfastStatuses]);
+
+  useEffect(() => {
+    setVisibleRows(ORDERS_PAGE_SIZE);
+    setSelectedOrderIds(new Set());
+  }, [search, statusFilter, sourceFilter, steadfastFilter, dateFrom, dateTo]);
+
+  const displayedOrders = useMemo(
+    () => filteredOrders.slice(0, visibleRows),
+    [filteredOrders, visibleRows]
+  );
+
+  const hasMoreOrders = displayedOrders.length < filteredOrders.length;
 
   // Count for Steadfast filters
   const getSteadfastCount = (filterType: string) => {
@@ -518,10 +556,10 @@ export default function AdminOrders() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedOrderIds.size === filteredOrders.length) {
+    if (selectedOrderIds.size > 0 && selectedOrderIds.size === displayedOrders.length) {
       setSelectedOrderIds(new Set());
     } else {
-      setSelectedOrderIds(new Set(filteredOrders.map(o => o.id)));
+      setSelectedOrderIds(new Set(displayedOrders.map(o => o.id)));
     }
   };
 
@@ -1013,7 +1051,7 @@ export default function AdminOrders() {
               <TableRow>
                 <TableHead className="w-10">
                   <Checkbox
-                    checked={selectedOrderIds.size > 0 && selectedOrderIds.size === filteredOrders.length}
+                    checked={displayedOrders.length > 0 && selectedOrderIds.size > 0 && selectedOrderIds.size === displayedOrders.length}
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
@@ -1033,7 +1071,7 @@ export default function AdminOrders() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredOrders.map((order) => (
+              {displayedOrders.map((order) => (
                 <TableRow key={order.id}>
                   <TableCell>
                     <Checkbox
@@ -1207,6 +1245,14 @@ export default function AdminOrders() {
           </Table>
         </CardContent>
       </Card>
+
+      {hasMoreOrders && (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={() => setVisibleRows((prev) => prev + ORDERS_PAGE_SIZE)}>
+            Load More Orders ({filteredOrders.length - displayedOrders.length} remaining)
+          </Button>
+        </div>
+      )}
 
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

@@ -79,7 +79,7 @@ function AdminSidebar() {
     queryFn: async () => {
       const { count, error } = await supabase
         .from('contact_submissions')
-        .select('*', { count: 'exact', head: true })
+        .select('*', { count: 'planned', head: true })
         .eq('is_read', false);
       
       if (error) throw error;
@@ -97,7 +97,7 @@ function AdminSidebar() {
     queryFn: async () => {
       const { count, error } = await supabase
         .from('orders')
-        .select('*', { count: 'exact', head: true })
+        .select('*', { count: 'planned', head: true })
         .eq('status', 'pending');
       
       if (error) throw error;
