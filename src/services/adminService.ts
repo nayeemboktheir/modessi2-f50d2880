@@ -52,30 +52,30 @@ export const getDashboardStats = async (dateParams?: DateRangeParams) => {
   const [ordersResult, ordersCountResult, productsResult, usersCountResult, lowStockResult, pendingResult] = await Promise.all([
     // Filtered orders for chart data (only within date range)
     supabase.from('orders')
-      .select('total, status, created_at, payment_status')
+      .select('total, created_at, payment_status')
       .gte('created_at', startISO)
       .lte('created_at', endISO)
       .order('created_at', { ascending: false })
-      .limit(500),
-    // Total count of filtered orders
+      .limit(200),
+    // Total count of filtered orders (fast estimate)
     supabase.from('orders')
-      .select('*', { count: 'exact', head: true })
+      .select('*', { count: 'planned', head: true })
       .gte('created_at', startISO)
       .lte('created_at', endISO),
-    // Product count only
+    // Product count only (fast estimate)
     supabase.from('products')
-      .select('*', { count: 'exact', head: true }),
-    // User count only
+      .select('*', { count: 'planned', head: true }),
+    // User count only (fast estimate)
     supabase.from('profiles')
-      .select('*', { count: 'exact', head: true }),
-    // Low stock count
+      .select('*', { count: 'planned', head: true }),
+    // Low stock count (fast estimate)
     supabase.from('products')
-      .select('*', { count: 'exact', head: true })
+      .select('*', { count: 'planned', head: true })
       .lt('stock', 10)
       .eq('is_active', true),
-    // Pending orders count (within date range)
+    // Pending orders count (within date range, fast estimate)
     supabase.from('orders')
-      .select('*', { count: 'exact', head: true })
+      .select('*', { count: 'planned', head: true })
       .eq('status', 'pending')
       .gte('created_at', startISO)
       .lte('created_at', endISO),
@@ -239,7 +239,7 @@ export const getAllOrders = async () => {
       order_items (id, order_id, product_id, product_name, product_image, quantity, price, variation_name)
     `)
     .order('created_at', { ascending: false })
-    .limit(300);
+    .limit(200);
 
   if (error) throw error;
   return data;

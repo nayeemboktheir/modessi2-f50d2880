@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { store } from '@/store/store';
 import { AuthProvider } from '@/hooks/useAuth';
 import { FacebookPixelTracker } from '@/components/tracking/FacebookPixelTracker';
@@ -56,6 +56,24 @@ import AdminLandingVideoSettings from '@/pages/admin/AdminLandingVideoSettings';
 
 const queryClient = new QueryClient();
 
+const GlobalAppEffects = () => {
+  const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith('/admin');
+
+  if (isAdminRoute) {
+    return null;
+  }
+
+  return (
+    <>
+      <FaviconLoader />
+      <FacebookPixelTracker />
+      <GoogleAnalyticsTracker />
+      <TikTokPixelTracker />
+    </>
+  );
+};
+
 const App = () => (
   <Provider store={store}>
     <QueryClientProvider client={queryClient}>
@@ -64,10 +82,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <FaviconLoader />
-            <FacebookPixelTracker />
-            <GoogleAnalyticsTracker />
-            <TikTokPixelTracker />
+            <GlobalAppEffects />
             <CartDrawer />
             <Routes>
               {/* Main Pages */}
