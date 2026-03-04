@@ -53,9 +53,8 @@ const Header = () => {
       return settingsMap;
     },
     // Don't keep stale for minutes — we want header to reflect admin changes quickly
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
   });
 
   const siteName = headerSettings?.site_name || 'খেজুর বাজার';

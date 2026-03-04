@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 import { useQuery } from '@tanstack/react-query';
 import heroSlide1 from '@/assets/hero-slide-1.jpg';
 import heroSlide2 from '@/assets/hero-slide-2.jpg';
@@ -59,8 +60,7 @@ interface HomePageContent {
 export default function FashionHomePage() {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
-  const [user, setUser] = useState<any>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const { user, isAdmin } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
   const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
   const [newArrivals, setNewArrivals] = useState<Product[]>([]);
@@ -92,9 +92,8 @@ export default function FashionHomePage() {
 
       return settingsMap;
     },
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
   });
 
   const siteName = headerSettings?.site_name || 'Modessi';
@@ -103,11 +102,23 @@ export default function FashionHomePage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch home page content
-        const { data: homePageData } = await supabase
-          .from('home_page_content')
-          .select('*');
-        
+        // Run all independent queries in parallel for speed
+        const [
+          { data: homePageData },
+          { data: bannersData },
+          { data: categoriesData },
+          { data: featuredData },
+          { data: newData },
+          { data: recentData },
+        ] = await Promise.all([
+          supabase.from('home_page_content').select('*'),
+          supabase.from('banners').select('*').eq('is_active', true).order('sort_order', { ascending: true }),
+          supabase.from('categories').select('*').order('sort_order', { ascending: true }),
+          supabase.from('products').select('*').eq('is_featured', true).eq('is_active', true).limit(8),
+          supabase.from('products').select('*').eq('is_new', true).eq('is_active', true).limit(8),
+          supabase.from('products').select('*').eq('is_active', true).order('created_at', { ascending: false }).limit(8),
+        ]);
+
         if (homePageData) {
           const contentMap: HomePageContent = {};
           homePageData.forEach((item: any) => {
@@ -116,85 +127,41 @@ export default function FashionHomePage() {
           setHomeContent(contentMap);
         }
 
-        // Fetch banners
-        const { data: bannersData } = await supabase
-          .from('banners')
-          .select('*')
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true });
-        
         if (bannersData && bannersData.length > 0) {
           setBanners(bannersData);
         }
 
-        const { data: categoriesData } = await supabase
-          .from('categories')
-          .select('*')
-          .order('sort_order', { ascending: true });
-        
         if (categoriesData) {
-          const categoriesWithImages = await Promise.all(
-            categoriesData.map(async (cat) => {
-              if (cat.image_url) return cat;
-              
-              const { data: productData } = await supabase
-                .from('products')
-                .select('images')
-                .eq('category_id', cat.id)
-                .eq('is_active', true)
-                .not('images', 'is', null)
-                .limit(1)
-                .single();
-              
-              return {
-                ...cat,
-                productImage: productData?.images?.[0] || null
-              };
-            })
-          );
-          setCategories(categoriesWithImages);
+          // For categories without images, fetch first product image in parallel
+          const catsNeedingImages = categoriesData.filter(cat => !cat.image_url);
+          let productImages: Record<string, string | null> = {};
+          
+          if (catsNeedingImages.length > 0) {
+            const imageResults = await Promise.all(
+              catsNeedingImages.map(cat =>
+                supabase
+                  .from('products')
+                  .select('images')
+                  .eq('category_id', cat.id)
+                  .eq('is_active', true)
+                  .not('images', 'is', null)
+                  .limit(1)
+                  .single()
+                  .then(({ data }) => ({ catId: cat.id, image: data?.images?.[0] || null }))
+              )
+            );
+            imageResults.forEach(r => { productImages[r.catId] = r.image; });
+          }
+
+          setCategories(categoriesData.map(cat => ({
+            ...cat,
+            productImage: cat.image_url ? null : (productImages[cat.id] || null)
+          })));
         }
 
-        const { data: featuredData } = await supabase
-          .from('products')
-          .select('*')
-          .eq('is_featured', true)
-          .eq('is_active', true)
-          .limit(8);
-        
         if (featuredData) setFeaturedProducts(featuredData);
-
-        const { data: newData } = await supabase
-          .from('products')
-          .select('*')
-          .eq('is_new', true)
-          .eq('is_active', true)
-          .limit(8);
-        
         if (newData) setNewArrivals(newData);
-
-        // Fetch recent products (most recently uploaded)
-        const { data: recentData } = await supabase
-          .from('products')
-          .select('*')
-          .eq('is_active', true)
-          .order('created_at', { ascending: false })
-          .limit(8);
-        
         if (recentData) setRecentProducts(recentData);
-
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        setUser(currentUser);
-        
-        if (currentUser) {
-          const { data: roleData } = await supabase
-            .from('user_roles')
-            .select('role')
-            .eq('user_id', currentUser.id)
-            .eq('role', 'admin')
-            .maybeSingle();
-          setIsAdmin(!!roleData);
-        }
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
