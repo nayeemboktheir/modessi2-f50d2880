@@ -92,46 +92,53 @@ async function processQueue() {
   if (processing) return;
   processing = true;
 
-  while (queue.length > 0) {
-    const item = queue.shift()!;
+  try {
+    while (queue.length > 0) {
+      const item = queue.shift()!;
 
-    // Double-check cache (might have been fetched while queued)
-    const cached = getCached(item.phone);
-    if (cached) {
-      item.resolve(cached.summary);
-      continue;
-    }
-
-    try {
-      const { data, error } = await supabase.functions.invoke("courier-history", {
-        body: { phone: item.phone },
-      });
-
-      if (error) throw error;
-
-      const response = data as CourierHistoryApiResponse | undefined;
-      if (response?.blocked) {
-        // Cache as empty so we don't retry
-        setCache(item.phone, undefined);
-        item.resolve(undefined);
+      // Double-check cache (might have been fetched while queued)
+      const cached = getCached(item.phone);
+      if (cached) {
+        item.resolve(cached.summary);
         continue;
       }
-      if (response?.error) throw new Error(response.error);
 
-      const s = response?.data?.courierData?.summary;
-      setCache(item.phone, s);
-      item.resolve(s);
-    } catch (err) {
-      // Cache failure too so we don't spam retries
-      setCache(item.phone, undefined);
-      item.reject(err);
+      try {
+        console.log('[CourierHistory] Fetching:', item.phone);
+        const { data, error } = await supabase.functions.invoke("courier-history", {
+          body: { phone: item.phone },
+        });
+
+        if (error) throw error;
+
+        const response = data as CourierHistoryApiResponse | undefined;
+        if (response?.blocked) {
+          setCache(item.phone, undefined);
+          item.resolve(undefined);
+          continue;
+        }
+        if (response?.error) throw new Error(response.error);
+
+        const s = response?.data?.courierData?.summary;
+        setCache(item.phone, s);
+        console.log('[CourierHistory] Got:', item.phone, s);
+        item.resolve(s);
+      } catch (err) {
+        console.warn('[CourierHistory] Error for', item.phone, err);
+        setCache(item.phone, undefined);
+        item.resolve(undefined); // resolve instead of reject to not break UI
+      }
+
+      // Small delay between requests to avoid rate limiting
+      await new Promise((r) => setTimeout(r, 300));
     }
-
-    // Small delay between requests to avoid rate limiting
-    await new Promise((r) => setTimeout(r, 300));
+  } finally {
+    processing = false;
+    // If new items were added while we were in the finally block, restart
+    if (queue.length > 0) {
+      setTimeout(processQueue, 50);
+    }
   }
-
-  processing = false;
 }
 
 function enqueueFetch(phone: string): Promise<Summary | undefined> {
