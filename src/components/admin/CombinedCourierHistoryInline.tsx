@@ -154,6 +154,24 @@ function RiskBadge({ level }: { level: string }) {
   );
 }
 
+// Global queue to stagger BD Courier requests
+let bdFetchQueue: Array<() => Promise<void>> = [];
+let bdFetchRunning = false;
+
+async function processBdQueue() {
+  if (bdFetchRunning) return;
+  bdFetchRunning = true;
+  while (bdFetchQueue.length > 0) {
+    const task = bdFetchQueue.shift();
+    if (task) {
+      await task();
+      // 2.5s gap between requests to respect rate limits
+      await new Promise(r => setTimeout(r, 2500));
+    }
+  }
+  bdFetchRunning = false;
+}
+
 export function CombinedCourierHistoryInline({ 
   phone, 
   className,
@@ -169,14 +187,13 @@ export function CombinedCourierHistoryInline({
 
   const normalizedPhone = useMemo(() => normalizePhone(phone), [phone]);
 
-  // Initial fetch - optionally include BD Courier data
+  // Initial fetch - always skip BD Courier to load page fast
   useEffect(() => {
     if (!normalizedPhone || normalizedPhone.length < 11) {
       setLoading(false);
       return;
     }
 
-    // Check cache first
     const cached = cache.get(normalizedPhone);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       setData(cached.data);
@@ -184,28 +201,61 @@ export function CombinedCourierHistoryInline({
       return;
     }
 
+    let mounted = true;
     const fetchData = async () => {
       try {
         const { data: result, error } = await supabase.functions.invoke(
           "combined-courier-history",
-          { body: { phone: normalizedPhone, skipBdCourier: !autoFetchBdCourier } }
+          { body: { phone: normalizedPhone, skipBdCourier: true } }
         );
 
         if (error) throw error;
 
-        if (result) {
+        if (result && mounted) {
           cache.set(normalizedPhone, { data: result, timestamp: Date.now() });
           setData(result);
         }
       } catch (err) {
         console.error("Error fetching combined history:", err);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
 
     fetchData();
+    return () => { mounted = false; };
   }, [normalizedPhone]);
+
+  // Auto-fetch BD Courier data via staggered queue after initial load
+  useEffect(() => {
+    if (!autoFetchBdCourier || loading || !data || data.bd_courier_available) return;
+
+    let mounted = true;
+    const task = async () => {
+      if (!mounted) return;
+      setFetchingBdCourier(true);
+      try {
+        const { data: result, error } = await supabase.functions.invoke(
+          "combined-courier-history",
+          { body: { phone: normalizedPhone } }
+        );
+        if (error) throw error;
+        if (result && mounted) {
+          cache.set(normalizedPhone, { data: result, timestamp: Date.now() });
+          setData(result);
+        }
+      } catch (err) {
+        console.error("Error fetching BD Courier:", err);
+      } finally {
+        if (mounted) setFetchingBdCourier(false);
+      }
+    };
+
+    bdFetchQueue.push(task);
+    processBdQueue();
+
+    return () => { mounted = false; };
+  }, [autoFetchBdCourier, loading, data?.bd_courier_available, normalizedPhone]);
 
   // Function to fetch BD Courier data on demand
   const fetchBdCourierData = useCallback(async () => {
