@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { syncOrderToBotBhai, deleteOrderFromBotBhai } from '@/services/botbhaiService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -92,6 +92,7 @@ interface Order {
   notes: string | null;
   invoice_note: string | null;
   steadfast_note: string | null;
+  steadfast_consignment_id?: string | null;
   created_at: string;
   order_items: OrderItem[];
   order_source: string;
@@ -113,19 +114,7 @@ const statusOptions = [
   { value: 'cancelled', label: 'Cancelled', icon: XCircle, color: 'bg-red-500' },
 ];
 
-// Get order count by phone number for repeat customer detection
-const getOrderCountByPhone = (orders: Order[], phone: string): number => {
-  const normalizedPhone = phone.replace(/\D/g, '').slice(-11);
-  return orders.filter(o => o.shipping_phone.replace(/\D/g, '').slice(-11) === normalizedPhone).length;
-};
-
-// Get previous orders for a phone number
-const getPreviousOrdersByPhone = (orders: Order[], phone: string, excludeOrderId?: string): Order[] => {
-  const normalizedPhone = phone.replace(/\D/g, '').slice(-11);
-  return orders
-    .filter(o => o.shipping_phone.replace(/\D/g, '').slice(-11) === normalizedPhone && o.id !== excludeOrderId)
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-};
+const normalizePhoneForLookup = (phone: string): string => phone.replace(/\D/g, '').slice(-11);
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -157,6 +146,38 @@ export default function AdminOrders() {
   const [invoiceNote, setInvoiceNote] = useState('');
   const [steadfastNote, setSteadfastNote] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
+
+  const phoneOrderStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    const groups = new Map<string, Order[]>();
+
+    for (const order of orders) {
+      const normalizedPhone = normalizePhoneForLookup(order.shipping_phone);
+      counts.set(normalizedPhone, (counts.get(normalizedPhone) ?? 0) + 1);
+
+      const existingGroup = groups.get(normalizedPhone);
+      if (existingGroup) {
+        existingGroup.push(order);
+      } else {
+        groups.set(normalizedPhone, [order]);
+      }
+    }
+
+    for (const group of groups.values()) {
+      group.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+
+    return { counts, groups };
+  }, [orders]);
+
+  const getOrderCount = useCallback((phone: string) => {
+    return phoneOrderStats.counts.get(normalizePhoneForLookup(phone)) ?? 0;
+  }, [phoneOrderStats]);
+
+  const getPreviousOrders = useCallback((phone: string, excludeOrderId?: string) => {
+    const ordersByPhone = phoneOrderStats.groups.get(normalizePhoneForLookup(phone)) ?? [];
+    return excludeOrderId ? ordersByPhone.filter((o) => o.id !== excludeOrderId) : ordersByPhone;
+  }, [phoneOrderStats]);
 
   const openEditDialog = (order: Order) => {
     setOrderToEdit(order);
@@ -227,50 +248,52 @@ export default function AdminOrders() {
 
   // Don't auto-fetch statuses on load - only on manual refresh
 
-  const filteredOrders = orders.filter(order => {
-    const matchesSearch = order.order_number.toLowerCase().includes(search.toLowerCase()) ||
-      order.shipping_name.toLowerCase().includes(search.toLowerCase()) ||
-      order.shipping_phone.includes(search);
-    const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-    const matchesSource = sourceFilter === 'all' || order.order_source === sourceFilter;
-    
-    // Date filter
-    const orderDate = new Date(order.created_at);
-    orderDate.setHours(0, 0, 0, 0);
-    
-    let matchesDate = true;
-    if (dateFrom) {
-      const fromDate = new Date(dateFrom);
-      fromDate.setHours(0, 0, 0, 0);
-      matchesDate = matchesDate && orderDate >= fromDate;
-    }
-    if (dateTo) {
-      const toDate = new Date(dateTo);
-      toDate.setHours(23, 59, 59, 999);
-      matchesDate = matchesDate && orderDate <= toDate;
-    }
-    
-    // Steadfast filter
-    let matchesSteadfast = true;
-    if (steadfastFilter !== 'all' && order.tracking_number) {
-      const sfStatus = steadfastStatuses[order.tracking_number];
-      const deliveryStatus = sfStatus?.delivery_status?.toLowerCase() || sfStatus?.current_status?.toLowerCase() || '';
+  const filteredOrders = useMemo(() => {
+    return orders.filter(order => {
+      const matchesSearch = order.order_number.toLowerCase().includes(search.toLowerCase()) ||
+        order.shipping_name.toLowerCase().includes(search.toLowerCase()) ||
+        order.shipping_phone.includes(search);
+      const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
+      const matchesSource = sourceFilter === 'all' || order.order_source === sourceFilter;
       
-      if (steadfastFilter === 'returned') {
-        matchesSteadfast = deliveryStatus.includes('return') || deliveryStatus.includes('cancelled');
-      } else if (steadfastFilter === 'delivered') {
-        matchesSteadfast = deliveryStatus.includes('delivered');
-      } else if (steadfastFilter === 'in_transit') {
-        matchesSteadfast = deliveryStatus.includes('transit') || deliveryStatus.includes('picked') || deliveryStatus.includes('hub');
-      } else if (steadfastFilter === 'pending_delivery') {
-        matchesSteadfast = deliveryStatus.includes('pending') || deliveryStatus === '';
+      // Date filter
+      const orderDate = new Date(order.created_at);
+      orderDate.setHours(0, 0, 0, 0);
+      
+      let matchesDate = true;
+      if (dateFrom) {
+        const fromDate = new Date(dateFrom);
+        fromDate.setHours(0, 0, 0, 0);
+        matchesDate = matchesDate && orderDate >= fromDate;
       }
-    } else if (steadfastFilter !== 'all' && !order.tracking_number) {
-      matchesSteadfast = false;
-    }
-    
-    return matchesSearch && matchesStatus && matchesSource && matchesSteadfast && matchesDate;
-  });
+      if (dateTo) {
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        matchesDate = matchesDate && orderDate <= toDate;
+      }
+      
+      // Steadfast filter
+      let matchesSteadfast = true;
+      if (steadfastFilter !== 'all' && order.tracking_number) {
+        const sfStatus = steadfastStatuses[order.tracking_number];
+        const deliveryStatus = sfStatus?.delivery_status?.toLowerCase() || sfStatus?.current_status?.toLowerCase() || '';
+        
+        if (steadfastFilter === 'returned') {
+          matchesSteadfast = deliveryStatus.includes('return') || deliveryStatus.includes('cancelled');
+        } else if (steadfastFilter === 'delivered') {
+          matchesSteadfast = deliveryStatus.includes('delivered');
+        } else if (steadfastFilter === 'in_transit') {
+          matchesSteadfast = deliveryStatus.includes('transit') || deliveryStatus.includes('picked') || deliveryStatus.includes('hub');
+        } else if (steadfastFilter === 'pending_delivery') {
+          matchesSteadfast = deliveryStatus.includes('pending') || deliveryStatus === '';
+        }
+      } else if (steadfastFilter !== 'all' && !order.tracking_number) {
+        matchesSteadfast = false;
+      }
+      
+      return matchesSearch && matchesStatus && matchesSource && matchesSteadfast && matchesDate;
+    });
+  }, [orders, search, statusFilter, sourceFilter, steadfastFilter, dateFrom, dateTo, steadfastStatuses]);
 
   // Count for Steadfast filters
   const getSteadfastCount = (filterType: string) => {
@@ -1056,7 +1079,7 @@ export default function AdminOrders() {
                           >
                             {order.shipping_name}
                           </span>
-                          {getOrderCountByPhone(orders, order.shipping_phone) > 1 && (
+                          {getOrderCount(order.shipping_phone) > 1 && (
                             <Badge variant="secondary" className="gap-1 text-xs bg-amber-100 text-amber-700 hover:bg-amber-200">
                               <UserCheck className="h-3 w-3" />
                               Repeat
@@ -1217,7 +1240,7 @@ export default function AdminOrders() {
                 <div>
                   <h3 className="font-medium mb-2 flex items-center gap-2">
                     Customer Information
-                    {getOrderCountByPhone(orders, selectedOrder.shipping_phone) > 1 && (
+                    {getOrderCount(selectedOrder.shipping_phone) > 1 && (
                       <Badge variant="secondary" className="gap-1 text-xs bg-amber-100 text-amber-700">
                         <UserCheck className="h-3 w-3" />
                         Repeat Customer
@@ -1245,7 +1268,7 @@ export default function AdminOrders() {
 
               {/* Previous Orders Section */}
               {(() => {
-                const previousOrders = getPreviousOrdersByPhone(orders, selectedOrder.shipping_phone, selectedOrder.id);
+                const previousOrders = getPreviousOrders(selectedOrder.shipping_phone, selectedOrder.id);
                 if (previousOrders.length === 0) return null;
                 return (
                   <div className="border rounded-lg p-3 bg-amber-50">
