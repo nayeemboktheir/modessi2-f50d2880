@@ -118,7 +118,7 @@ const normalizePhoneForLookup = (phone: string): string => phone.replace(/\D/g, 
 const ORDERS_CACHE_KEY = 'admin_orders_cache_v1';
 const ORDERS_CACHE_TTL = 60 * 1000;
 const ORDERS_PAGE_SIZE = 40;
-const ORDERS_FETCH_LIMIT = 200;
+const ORDERS_FETCH_LIMIT = Infinity;
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -214,7 +214,7 @@ export default function AdminOrders() {
     if (showLoader) setLoading(true);
 
     try {
-      const data = await getAllOrders(ORDERS_FETCH_LIMIT);
+      const data = await getAllOrders();
       const nextOrders = data || [];
       setOrders(nextOrders);
       sessionStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: nextOrders }));
