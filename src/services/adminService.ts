@@ -239,7 +239,7 @@ export const getAllOrders = async () => {
       order_items (id, order_id, product_id, product_name, product_image, quantity, price, variation_name)
     `)
     .order('created_at', { ascending: false })
-    .limit(200);
+    .limit(100);
 
   if (error) throw error;
   return data;
