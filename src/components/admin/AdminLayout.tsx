@@ -38,7 +38,6 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
-  useSidebar,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -86,7 +85,10 @@ function AdminSidebar() {
       if (error) throw error;
       return count || 0;
     },
-    refetchInterval: 30000, // Refresh every 30 seconds
+    staleTime: 60000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchInterval: 120000, // Refresh every 2 minutes
   });
 
   // Fetch pending orders count
@@ -101,7 +103,10 @@ function AdminSidebar() {
       if (error) throw error;
       return count || 0;
     },
-    refetchInterval: 30000, // Refresh every 30 seconds
+    staleTime: 60000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchInterval: 120000, // Refresh every 2 minutes
   });
 
   const handleSignOut = async () => {
