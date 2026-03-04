@@ -27,32 +27,43 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const adminCheckRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Get initial session first
-    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      setSession(initialSession);
-      setUser(initialSession?.user ?? null);
-      
-      if (initialSession?.user) {
-        checkAdminRole(initialSession.user.id);
+    const initializeAuth = async () => {
+      try {
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+
+        setSession(initialSession);
+        setUser(initialSession?.user ?? null);
+
+        if (initialSession?.user) {
+          await checkAdminRole(initialSession.user.id);
+        } else {
+          setIsAdmin(false);
+          adminCheckRef.current = null;
+        }
+      } finally {
+        setIsLoading(false);
+        initializedRef.current = true;
       }
-      
-      setIsLoading(false);
-      initializedRef.current = true;
-    });
+    };
+
+    void initializeAuth();
 
     // Then listen for changes (login, logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, newSession) => {
+      (_event, newSession) => {
         // Skip if this is the initial event before getSession resolves
         if (!initializedRef.current) return;
-        
+
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
           // Only re-check admin if user changed
           if (adminCheckRef.current !== newSession.user.id) {
-            checkAdminRole(newSession.user.id);
+            setIsLoading(true);
+            void checkAdminRole(newSession.user.id).finally(() => {
+              setIsLoading(false);
+            });
           }
         } else {
           setIsAdmin(false);
@@ -87,6 +98,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setIsAdmin(result);
     } catch (err) {
       console.error('Error checking admin role:', err);
+      adminCache.set(userId, { isAdmin: false, timestamp: Date.now() });
+      adminCheckRef.current = userId;
+      setIsAdmin(false);
     }
   };
 
