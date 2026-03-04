@@ -297,11 +297,27 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get BD Courier API key
-    const bdCourierApiKey = Deno.env.get("BDCOURIER_API_KEY") || "";
+    // Get BD Courier API key - check env first, then admin_settings
+    let bdCourierApiKey = Deno.env.get("BDCOURIER_API_KEY") || "";
 
     if (!bdCourierApiKey) {
-      console.log("BDCOURIER_API_KEY not configured");
+      try {
+        const { data: settingData } = await supabase
+          .from("admin_settings")
+          .select("value")
+          .eq("key", "bdcourier_api_key")
+          .single();
+        if (settingData?.value) {
+          bdCourierApiKey = settingData.value;
+          console.log("Using BD Courier API key from admin_settings");
+        }
+      } catch (e) {
+        console.log("Could not read bdcourier_api_key from admin_settings");
+      }
+    }
+
+    if (!bdCourierApiKey) {
+      console.log("BDCOURIER_API_KEY not configured anywhere");
     }
 
     // Fetch internal history first (always)
