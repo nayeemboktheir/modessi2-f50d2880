@@ -52,9 +52,10 @@ interface CombinedResponse {
 const cache = new Map<string, { data: CombinedResponse; timestamp: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
-// Global request queue to prevent parallel requests
-const requestQueue: string[] = [];
-let isProcessingQueue = false;
+// Limit background auto-fetches to avoid backend overload on Orders page
+const AUTO_BD_FETCH_LIMIT = 5;
+const autoFetchedPhones = new Set<string>();
+let autoFetchCount = 0;
 
 function normalizePhone(phone: string): string {
   let cleaned = phone.replace(/[^0-9]/g, "");
@@ -187,9 +188,10 @@ export function CombinedCourierHistoryInline({
 
   const normalizedPhone = useMemo(() => normalizePhone(phone), [phone]);
 
-  // Initial fetch - always skip BD Courier to load page fast
+  // Keep mount lightweight: only hydrate from cache, don't hit backend for every row
   useEffect(() => {
     if (!normalizedPhone || normalizedPhone.length < 11) {
+      setData(null);
       setLoading(false);
       return;
     }
@@ -201,51 +203,54 @@ export function CombinedCourierHistoryInline({
       return;
     }
 
-    let mounted = true;
-    const fetchData = async () => {
+    setData(null);
+    setLoading(false);
+  }, [normalizedPhone]);
+
+  const fetchCombinedHistory = useCallback(
+    async (includeBdCourier: boolean, showLoading = false): Promise<CombinedResponse | null> => {
+      if (!normalizedPhone || normalizedPhone.length < 11) return null;
+
+      if (showLoading) setLoading(true);
       try {
         const { data: result, error } = await supabase.functions.invoke(
           "combined-courier-history",
-          { body: { phone: normalizedPhone, skipBdCourier: true } }
+          { body: { phone: normalizedPhone, skipBdCourier: !includeBdCourier } }
         );
 
         if (error) throw error;
 
-        if (result && mounted) {
+        if (result) {
           cache.set(normalizedPhone, { data: result, timestamp: Date.now() });
           setData(result);
+          return result;
         }
       } catch (err) {
         console.error("Error fetching combined history:", err);
       } finally {
-        if (mounted) setLoading(false);
+        if (showLoading) setLoading(false);
       }
-    };
 
-    fetchData();
-    return () => { mounted = false; };
-  }, [normalizedPhone]);
+      return null;
+    },
+    [normalizedPhone]
+  );
 
-  // Auto-fetch BD Courier data via staggered queue after initial load
+  // Auto-fetch BD Courier for pending rows, but with a strict global cap to protect backend
   useEffect(() => {
-    if (!autoFetchBdCourier || loading || !data || data.bd_courier_available) return;
+    if (!autoFetchBdCourier || !normalizedPhone || normalizedPhone.length < 11) return;
+    if (data?.bd_courier_available) return;
+    if (autoFetchCount >= AUTO_BD_FETCH_LIMIT || autoFetchedPhones.has(normalizedPhone)) return;
 
     let mounted = true;
+    autoFetchedPhones.add(normalizedPhone);
+    autoFetchCount += 1;
+
     const task = async () => {
       if (!mounted) return;
       setFetchingBdCourier(true);
       try {
-        const { data: result, error } = await supabase.functions.invoke(
-          "combined-courier-history",
-          { body: { phone: normalizedPhone } }
-        );
-        if (error) throw error;
-        if (result && mounted) {
-          cache.set(normalizedPhone, { data: result, timestamp: Date.now() });
-          setData(result);
-        }
-      } catch (err) {
-        console.error("Error fetching BD Courier:", err);
+        await fetchCombinedHistory(true);
       } finally {
         if (mounted) setFetchingBdCourier(false);
       }
@@ -254,8 +259,10 @@ export function CombinedCourierHistoryInline({
     bdFetchQueue.push(task);
     processBdQueue();
 
-    return () => { mounted = false; };
-  }, [autoFetchBdCourier, loading, data?.bd_courier_available, normalizedPhone]);
+    return () => {
+      mounted = false;
+    };
+  }, [autoFetchBdCourier, normalizedPhone, data?.bd_courier_available, fetchCombinedHistory]);
 
   // Function to fetch BD Courier data on demand
   const fetchBdCourierData = useCallback(async () => {
@@ -263,23 +270,24 @@ export function CombinedCourierHistoryInline({
 
     setFetchingBdCourier(true);
     try {
-      const { data: result, error } = await supabase.functions.invoke(
-        "combined-courier-history",
-        { body: { phone: normalizedPhone } }
-      );
-
-      if (error) throw error;
-
-      if (result) {
-        cache.set(normalizedPhone, { data: result, timestamp: Date.now() });
-        setData(result);
-      }
-    } catch (err) {
-      console.error("Error fetching BD Courier data:", err);
+      await fetchCombinedHistory(true, !data);
     } finally {
       setFetchingBdCourier(false);
     }
-  }, [normalizedPhone, fetchingBdCourier, data?.bd_courier_available]);
+  }, [normalizedPhone, fetchingBdCourier, data, data?.bd_courier_available, fetchCombinedHistory]);
+
+  const handleTriggerHover = useCallback(async () => {
+    if (fetchingBdCourier || !normalizedPhone || normalizedPhone.length < 11) return;
+
+    if (!data) {
+      await fetchCombinedHistory(false, true);
+      return;
+    }
+
+    if (!data.bd_courier_available) {
+      await fetchBdCourierData();
+    }
+  }, [fetchingBdCourier, normalizedPhone, data, fetchCombinedHistory, fetchBdCourierData]);
 
   if (loading) {
     return (
@@ -290,7 +298,28 @@ export function CombinedCourierHistoryInline({
   }
 
   if (!data) {
-    return null;
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div
+              className={cn("flex items-center gap-1.5 cursor-help", className)}
+              onMouseEnter={() => { void handleTriggerHover(); }}
+            >
+              <RiskBadge level="new" />
+              {fetchingBdCourier && (
+                <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />
+              )}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="left" className="max-w-xs p-3">
+            <div className="text-xs text-muted-foreground">
+              Hover to load customer history
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
   }
 
   const { internal, bd_courier, bd_courier_available, combined_risk_level } = data;
@@ -321,7 +350,7 @@ export function CombinedCourierHistoryInline({
         <TooltipTrigger asChild>
           <div 
             className={cn("flex items-center gap-1.5 cursor-help", className)}
-            onMouseEnter={fetchBdCourierData}
+            onMouseEnter={() => { void handleTriggerHover(); }}
           >
             {hasAnyData ? (
               <>
