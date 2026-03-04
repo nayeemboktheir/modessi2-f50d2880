@@ -229,7 +229,7 @@ export const deleteCategory = async (id: string) => {
 };
 
 // Orders Management
-export const getAllOrders = async () => {
+export const getAllOrders = async (limit = 200) => {
   const { data, error } = await supabase
     .from('orders')
     .select(`
@@ -239,7 +239,23 @@ export const getAllOrders = async () => {
       order_items (id, order_id, product_id, product_name, product_image, quantity, price, variation_name)
     `)
     .order('created_at', { ascending: false })
-    .limit(500);
+    .limit(limit);
+
+  if (error) throw error;
+  return data;
+};
+
+export const getOrderById = async (orderId: string) => {
+  const { data, error } = await supabase
+    .from('orders')
+    .select(`
+      id, order_number, status, payment_status, payment_method, total, subtotal, shipping_cost, discount,
+      shipping_name, shipping_phone, shipping_street, shipping_city, shipping_district, shipping_postal_code,
+      tracking_number, notes, invoice_note, steadfast_note, steadfast_consignment_id, created_at, order_source, is_printed,
+      order_items (id, order_id, product_id, product_name, product_image, quantity, price, variation_name)
+    `)
+    .eq('id', orderId)
+    .single();
 
   if (error) throw error;
   return data;

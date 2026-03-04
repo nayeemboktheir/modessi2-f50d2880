@@ -35,7 +35,7 @@ import { Search, Eye, Package, Truck, CheckCircle, XCircle, Clock, Send, Printer
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { supabase } from '@/integrations/supabase/client';
-import { getAllOrders, updateOrderStatus, deleteOrder } from '@/services/adminService';
+import { getAllOrders, getOrderById, updateOrderStatus, deleteOrder } from '@/services/adminService';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,7 +48,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
 import { CourierHistoryDialog } from '@/components/admin/CourierHistoryDialog';
-import { CombinedCourierHistoryInline } from '@/components/admin/CombinedCourierHistoryInline';
 import { InvoicePrintDialog } from '@/components/admin/InvoicePrintDialog';
 import { StickerPrintDialog } from '@/components/admin/StickerPrintDialog';
 import { ManualOrderDialog } from '@/components/admin/ManualOrderDialog';
@@ -119,6 +118,7 @@ const normalizePhoneForLookup = (phone: string): string => phone.replace(/\D/g, 
 const ORDERS_CACHE_KEY = 'admin_orders_cache_v1';
 const ORDERS_CACHE_TTL = 60 * 1000;
 const ORDERS_PAGE_SIZE = 40;
+const ORDERS_FETCH_LIMIT = 200;
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -214,7 +214,7 @@ export default function AdminOrders() {
     if (showLoader) setLoading(true);
 
     try {
-      const data = await getAllOrders();
+      const data = await getAllOrders(ORDERS_FETCH_LIMIT);
       const nextOrders = data || [];
       setOrders(nextOrders);
       sessionStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: nextOrders }));
@@ -222,6 +222,28 @@ export default function AdminOrders() {
       toast.error('Failed to load orders');
     } finally {
       if (showLoader) setLoading(false);
+    }
+  };
+
+  const handleManualOrderCreated = async (orderId?: string) => {
+    if (!orderId) {
+      void loadOrders(false);
+      return;
+    }
+
+    try {
+      const createdOrder = await getOrderById(orderId) as Order;
+      setOrders((prev) => {
+        const exists = prev.some((order) => order.id === createdOrder.id);
+        const next = exists
+          ? prev.map((order) => (order.id === createdOrder.id ? createdOrder : order))
+          : [createdOrder, ...prev].slice(0, ORDERS_FETCH_LIMIT);
+
+        sessionStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: next }));
+        return next;
+      });
+    } catch {
+      void loadOrders(false);
     }
   };
 
@@ -1104,7 +1126,7 @@ export default function AdminOrders() {
                           )}
                         </div>
                         <div className="text-sm text-muted-foreground">{order.shipping_phone}</div>
-                        <CombinedCourierHistoryInline phone={order.shipping_phone} className="mt-2" />
+                        
                       </div>
                       <div className="shrink-0 pt-1">
                         <CourierHistoryDialog phone={order.shipping_phone} customerName={order.shipping_name} />
@@ -1525,7 +1547,7 @@ export default function AdminOrders() {
       <ManualOrderDialog
         open={isManualOrderOpen}
         onOpenChange={setIsManualOrderOpen}
-        onOrderCreated={() => { void loadOrders(false); }}
+        onOrderCreated={handleManualOrderCreated}
       />
     </div>
   );

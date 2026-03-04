@@ -40,7 +40,7 @@ interface OrderItem {
 interface ManualOrderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onOrderCreated: () => void;
+  onOrderCreated: (orderId?: string) => void;
 }
 
 // Bengali to English digit conversion
@@ -698,7 +698,7 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
 
       toast.success(`Order created successfully! Order #${data.orderNumber || data.orderId}`);
       resetForm();
-      onOrderCreated();
+      onOrderCreated(data.orderId);
       onOpenChange(false);
     } catch (error: any) {
       console.error('Failed to create order:', error);
