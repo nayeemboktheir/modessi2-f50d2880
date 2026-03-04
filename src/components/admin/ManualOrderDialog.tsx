@@ -34,6 +34,7 @@ interface OrderItem {
   quantity: number;
   variation?: ProductVariation;
   customPrice?: number; // Allow custom price override (can be 0 for free)
+  customSize?: string; // Allow manual size/variant text entry
 }
 
 interface ManualOrderDialogProps {
@@ -446,6 +447,21 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
     }));
   };
 
+  // Update custom size text for an item
+  const updateCustomSize = (productId: string, variationId: string | undefined, size: string) => {
+    setOrderItems(orderItems.map(item => {
+      if (item.product.id === productId) {
+        if (variationId && item.variation?.id === variationId) {
+          return { ...item, customSize: size || undefined };
+        }
+        if (!variationId && !item.variation) {
+          return { ...item, customSize: size || undefined };
+        }
+      }
+      return item;
+    }));
+  };
+
   const resetForm = () => {
     setOrderItems([]);
     setMobileNumber('');
@@ -578,12 +594,15 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
             const basePrice = item.variation ? item.variation.price : item.product.price;
             const itemPrice = item.customPrice !== undefined ? item.customPrice : basePrice;
             const variationName = item.variation?.name || null;
+            // Build display name with custom size if provided
+            const sizePart = item.customSize ? item.customSize : variationName;
+            const displayName = sizePart ? `${item.product.name} (${sizePart})` : item.product.name;
             return {
               productId: item.product.id,
               variationId: item.variation?.id || null,
-              variationName,
+              variationName: item.customSize || variationName,
               quantity: item.quantity,
-              productName: variationName ? `${item.product.name} (${variationName})` : item.product.name,
+              productName: displayName,
               productImage: item.product.images?.[0] || null,
               price: itemPrice,
             };
@@ -901,11 +920,20 @@ export function ManualOrderDialog({ open, onOpenChange, onOrderCreated }: Manual
                           )}
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate">{item.product.name}</p>
-                            {item.variation && (
-                              <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
-                                {item.variation.name}
-                              </Badge>
-                            )}
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {item.variation && (
+                                <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                                  {item.variation.name}
+                                </Badge>
+                              )}
+                              <Input
+                                type="text"
+                                value={item.customSize || ''}
+                                onChange={(e) => updateCustomSize(item.product.id, item.variation?.id, e.target.value)}
+                                className="h-6 w-20 text-xs px-1 py-0"
+                                placeholder="Size.."
+                              />
+                            </div>
                             {/* Editable price input */}
                             <div className="flex items-center gap-1 mt-1">
                               <span className="text-xs text-muted-foreground">৳</span>
