@@ -237,7 +237,7 @@ const ORDER_SELECT = `
 `;
 
 export const getAllOrders = async (_limit?: number) => {
-  const BATCH = 1000;
+  const BATCH = 800;
   const allData: any[] = [];
   let offset = 0;
 
@@ -260,12 +260,11 @@ export const getAllOrders = async (_limit?: number) => {
 
       batchError = error;
       if (attempt === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
     }
 
     if (batchError) {
-      // Return what we already have instead of failing the whole page.
       if (allData.length > 0) return allData;
       throw batchError;
     }
@@ -273,6 +272,10 @@ export const getAllOrders = async (_limit?: number) => {
     if (!data || data.length === 0) break;
 
     allData.push(...data);
+    if (_limit && allData.length >= _limit) {
+      return allData.slice(0, _limit);
+    }
+
     if (data.length < BATCH) break;
     offset += BATCH;
   }

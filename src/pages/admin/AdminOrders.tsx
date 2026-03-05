@@ -120,6 +120,15 @@ const ORDERS_CACHE_KEY = 'admin_orders_cache_v2';
 const ORDERS_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 const ORDERS_PAGE_SIZE = 40;
 const AUTO_COURIER_FETCH_ROWS = 10;
+const LOAD_TIMEOUT_MS = 9000;
+const FAST_FALLBACK_LIMIT = 200;
+
+const FAST_ORDER_SELECT = `
+  id, order_number, status, payment_status, payment_method, total, subtotal, shipping_cost, discount,
+  shipping_name, shipping_phone, shipping_street, shipping_city, shipping_district, shipping_postal_code,
+  tracking_number, notes, invoice_note, steadfast_note, steadfast_consignment_id, created_at, order_source, is_printed,
+  order_items (id, order_id, product_id, product_name, product_image, quantity, price, variation_name)
+`;
 
 // Debounce hook for search
 function useDebouncedValue<T>(value: T, delay: number): T {
@@ -129,6 +138,15 @@ function useDebouncedValue<T>(value: T, delay: number): T {
     return () => clearTimeout(timer);
   }, [value, delay]);
   return debouncedValue;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
+    }),
+  ]);
 }
 
 export default function AdminOrders() {
@@ -230,7 +248,7 @@ export default function AdminOrders() {
 
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          const data = await getAllOrders();
+          const data = await withTimeout(getAllOrders(), LOAD_TIMEOUT_MS, 'orders_fetch');
           const nextOrders = data || [];
           setOrders(nextOrders);
           sessionStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: nextOrders }));
@@ -241,6 +259,20 @@ export default function AdminOrders() {
             await new Promise((resolve) => setTimeout(resolve, 300));
           }
         }
+      }
+
+      // Fast fallback: load recent orders so UI never stays stuck on skeleton
+      const { data: quickData, error: quickError } = await supabase
+        .from('orders')
+        .select(FAST_ORDER_SELECT)
+        .order('created_at', { ascending: false })
+        .limit(FAST_FALLBACK_LIMIT);
+
+      if (!quickError && Array.isArray(quickData) && quickData.length > 0) {
+        setOrders(quickData as unknown as Order[]);
+        sessionStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: quickData }));
+        toast.warning('Quick mode: showing recent orders');
+        return;
       }
 
       throw lastError;
